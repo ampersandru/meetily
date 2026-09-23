@@ -2,6 +2,19 @@
 
 This PR introduces end-to-end speaker diarization support using NVIDIA Parakeet + Nemotron-3 (Sortformer architecture), an interactive post-meeting speaker renaming modal with live audio snippet playback, and critical stability fixes for Windows builds and UI initialization.
 
+### Reference Links:
+- **Nemotron-3 Diarization Model**: [nvidia/Nemotron-3-Diarization on Hugging Face](https://huggingface.co/nvidia/Nemotron-3-Diarization)
+- **Official Announcement & Technical Blog**: [Know Who Spoke When: Build Real-Time, Multi-Speaker AI with NVIDIA Nemotron 3 Diarization](https://huggingface.co/blog/nvidia-nemotron-3-diarization)
+
+---
+
+### Beta Status & Reviewer Note:
+> [!NOTE]
+> **Beta Feature Notice**: This implementation is in early stages and should be considered **Beta**.
+> If preferred during review, the new **Diarization settings** panel can be easily relocated under the **Beta** settings tab instead of general settings. Feedback on UI placement and default thresholds is very welcome!
+
+---
+
 ### Key Changes:
 
 #### 1. NVIDIA Parakeet + Nemotron-3 Diarization Engine
@@ -70,3 +83,9 @@ Addresses speaker diarization integration, speaker identification workflows, and
 - Binary outputs:
   - Portable EXE: `target\release\meetily.exe`
   - Windows Installer: `target\release\bundle\nsis\meetily_*_x64-setup.exe`
+
+---
+
+## AI Disclaimer
+> [!NOTE]
+> **AI Disclaimer**: This feature and pull request were developed with AI assistance, but have been thoroughly and rigorously tested end-to-end by myself on Windows with an active NVIDIA GPU and CUDA environment.
