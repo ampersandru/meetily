@@ -244,7 +244,7 @@ pub mod windows_loopback {
         ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation,
         IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
         IAudioCaptureClient, IAudioClient, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
+        AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX,
     };
     use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
@@ -381,23 +381,48 @@ pub mod windows_loopback {
                 }
             };
 
-            let p_wfx = unsafe {
+            let mut fallback_wfx = WAVEFORMATEX {
+                wFormatTag: 1, // WAVE_FORMAT_PCM
+                nChannels: 2,
+                nSamplesPerSec: 48000,
+                nAvgBytesPerSec: 48000 * 4, // 192000 bytes/sec
+                nBlockAlign: 4, // 2 channels * 2 bytes/sample
+                wBitsPerSample: 16,
+                cbSize: 0,
+            };
+
+            let (p_wfx_to_use, channels, sample_rate, bits_per_sample, auto_convert_flags) = unsafe {
                 match audio_client.GetMixFormat() {
-                    Ok(f) => f,
-                    Err(e) => {
-                        log::error!("❌ Failed to get mix format: {}", e);
-                        return;
+                    Ok(p) if !p.is_null() => {
+                        let w = *p;
+                        let sr = w.nSamplesPerSec;
+                        let ch = w.nChannels;
+                        let bits = w.wBitsPerSample;
+                        log::info!(
+                            "🔊 Process loopback using native mix format: {} Hz, {} channels, {} bits/sample",
+                            sr, ch, bits
+                        );
+                        (p, ch, sr, bits, 0u32)
+                    }
+                    res => {
+                        log::info!(
+                            "ℹ️ audio_client.GetMixFormat() returned {:?} (expected for process loopback virtual audio device). Using 48kHz 16-bit PCM with AUTOCONVERTPCM",
+                            res.err()
+                        );
+                        (
+                            &mut fallback_wfx as *mut WAVEFORMATEX,
+                            2u16,
+                            48000u32,
+                            16u16,
+                            0x80000000u32 /* AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM */
+                                | 0x08000000u32 /* AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY */,
+                        )
                     }
                 }
             };
 
-            let wfx = unsafe { *p_wfx };
-            let channels = wfx.nChannels;
-            let sample_rate = wfx.nSamplesPerSec;
-            let bits_per_sample = wfx.wBitsPerSample;
-
             log::info!(
-                "🔊 Process loopback format: {} Hz, {} channels, {} bits/sample",
+                "🔊 Process loopback format configured: {} Hz, {} channels, {} bits/sample",
                 sample_rate, channels, bits_per_sample
             );
 
@@ -418,13 +443,17 @@ pub mod windows_loopback {
                 }
             };
 
+            let stream_flags = AUDCLNT_STREAMFLAGS_LOOPBACK
+                | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+                | auto_convert_flags;
+
             let init_res = unsafe {
                 audio_client.Initialize(
                     AUDCLNT_SHAREMODE_SHARED,
-                    AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                    stream_flags,
                     10_000_000, // 1 second buffer
                     0,
-                    p_wfx,
+                    p_wfx_to_use,
                     None,
                 )
             };
