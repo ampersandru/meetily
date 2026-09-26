@@ -468,6 +468,14 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               onDeviceChange={handleDeviceChange}
               disabled={saving}
             />
+            {preferences.per_app_recording_enabled && preferences.per_app_target_app && (
+              <div className="mt-3 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2 text-xs text-blue-700">
+                <AppWindow className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                <span>
+                  Per-app recording is active for <strong>{preferences.per_app_target_name || preferences.per_app_target_app}</strong>. System audio will capture this app only.
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>

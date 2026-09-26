@@ -327,10 +327,10 @@ pub async fn load_recording_preferences<R: Runtime>(
 
     set_mic_gain_runtime(prefs.mic_gain);
     set_system_gain_runtime(prefs.system_gain);
-    info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}, mic_gain={:.2}, system_gain={:.2}",
+    info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}, mic_gain={:.2}, system_gain={:.2}, per_app_enabled={}, per_app_target={:?}",
           prefs.save_folder, prefs.auto_save, prefs.file_format,
            prefs.preferred_mic_device, prefs.preferred_system_device, prefs.mic_gain,
-           prefs.system_gain);
+           prefs.system_gain, prefs.per_app_recording_enabled, prefs.per_app_target_app);
     Ok(prefs)
 }
 
@@ -346,10 +346,10 @@ pub async fn save_recording_preferences<R: Runtime>(
     // next recording startup.
     ensure_recordings_directory(&preferences.save_folder)?;
 
-    info!("Saving recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}, mic_gain={:.2}, system_gain={:.2}",
+    info!("Saving recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}, mic_gain={:.2}, system_gain={:.2}, per_app_enabled={}, per_app_target={:?}",
           preferences.save_folder, preferences.auto_save, preferences.file_format,
            preferences.preferred_mic_device, preferences.preferred_system_device,
-           preferences.mic_gain, preferences.system_gain);
+           preferences.mic_gain, preferences.system_gain, preferences.per_app_recording_enabled, preferences.per_app_target_app);
 
     // Get or create store
     let store = app

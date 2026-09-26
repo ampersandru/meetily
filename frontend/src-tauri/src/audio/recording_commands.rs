@@ -671,6 +671,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     };
     let auto_save = preferences.auto_save;
     manager.set_recordings_folder(preferences.save_folder);
+    manager.set_per_app_config(
+        preferences.per_app_recording_enabled,
+        preferences.per_app_target_app.clone(),
+        preferences.per_app_target_name.clone(),
+    );
 
     // Always ensure a meeting name is set so incremental saver initializes
     let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
@@ -697,7 +702,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         .map_err(|error| { crate::diarization::online::stop(); map_recording_start_error(&app, error) })?;
 
     #[cfg(target_os = "windows")]
-    start_windows_audio_route_monitor(&app, &manager, resolved_system_device_name);
+    if !preferences.per_app_recording_enabled {
+        start_windows_audio_route_monitor(&app, &manager, resolved_system_device_name);
+    }
 
     // Store the manager globally to keep it alive
     {

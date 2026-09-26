@@ -127,6 +127,7 @@ pub fn find_pid_for_app(target_app: &str) -> Option<u32> {
         .and_then(|f| f.to_str())
         .unwrap_or(target_app)
         .to_lowercase();
+    let target_base = target_clean.strip_suffix(".exe").unwrap_or(&target_clean);
 
     let mut sys = sysinfo::System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -137,23 +138,53 @@ pub fn find_pid_for_app(target_app: &str) -> Option<u32> {
     let audio_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
 
     let mut candidate_pids = Vec::new();
+    let mut candidate_parents = std::collections::HashMap::new();
 
     for (pid, process) in sys.processes() {
         let exe_name = process.name().to_string_lossy().to_string().to_lowercase();
+        let path_name = process
+            .exe()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_lowercase());
+
         let name_match = exe_name == target_clean
-            || exe_name.strip_suffix(".exe").unwrap_or(&exe_name)
-                == target_clean.strip_suffix(".exe").unwrap_or(&target_clean);
+            || exe_name.strip_suffix(".exe").unwrap_or(&exe_name) == target_base
+            || path_name.as_deref() == Some(&target_clean)
+            || path_name.as_deref().and_then(|p| p.strip_suffix(".exe")) == Some(target_base);
 
         if name_match {
             let p = pid.as_u32();
             if audio_pids.contains(&p) {
+                log::info!("🎯 Found active audio session PID {} for target app '{}'", p, target_app);
                 return Some(p);
             }
             candidate_pids.push(p);
+            if let Some(parent) = process.parent() {
+                candidate_parents.insert(p, parent.as_u32());
+            }
         }
     }
 
-    candidate_pids.first().copied()
+    // If an audio session pid wasn't found yet, prefer the root process of the tree
+    // (a process whose parent is not also in candidate_pids), because targeting
+    // the root with PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE captures
+    // the entire process tree.
+    for &pid in &candidate_pids {
+        if let Some(&parent_pid) = candidate_parents.get(&pid) {
+            if !candidate_pids.contains(&parent_pid) {
+                log::info!("🎯 Selected root candidate PID {} for target app '{}'", pid, target_app);
+                return Some(pid);
+            }
+        } else {
+            log::info!("🎯 Selected candidate PID {} (no parent) for target app '{}'", pid, target_app);
+            return Some(pid);
+        }
+    }
+
+    let fallback = candidate_pids.first().copied();
+    log::info!("🎯 Selected first candidate PID {:?} for target app '{}'", fallback, target_app);
+    fallback
 }
 
 #[cfg(windows)]
@@ -319,12 +350,9 @@ pub mod windows_loopback {
                 )
             };
 
-            unsafe {
-                let _ = PropVariantClear(&mut prop);
-            }
-
             if let Err(e) = async_op {
                 log::error!("❌ ActivateAudioInterfaceAsync failed: {}", e);
+                let _ = unsafe { PropVariantClear(&mut prop) };
                 return;
             }
 
@@ -332,13 +360,18 @@ pub mod windows_loopback {
                 Ok(Ok(unk)) => unk,
                 Ok(Err(hr)) => {
                     log::error!("❌ Process loopback activation failed with HRESULT 0x{:08X}", hr.0);
+                    let _ = unsafe { PropVariantClear(&mut prop) };
                     return;
                 }
                 Err(e) => {
                     log::error!("❌ Process loopback activation timed out: {}", e);
+                    let _ = unsafe { PropVariantClear(&mut prop) };
                     return;
                 }
             };
+
+            // Clear activation parameters now that async activation is finished
+            let _ = unsafe { PropVariantClear(&mut prop) };
 
             let audio_client: IAudioClient = match audio_client_unk.cast() {
                 Ok(client) => client,
