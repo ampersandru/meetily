@@ -29,6 +29,9 @@ pub struct RecordingManager {
     recording_saver: RecordingSaver,
     device_monitor: Option<AudioDeviceMonitor>,
     device_event_receiver: Option<mpsc::UnboundedReceiver<DeviceEvent>>,
+    per_app_enabled: bool,
+    per_app_target_app: Option<String>,
+    per_app_target_name: Option<String>,
 }
 
 // SAFETY: RecordingManager contains types that we've marked as Send
@@ -49,6 +52,9 @@ impl RecordingManager {
             recording_saver: RecordingSaver::new(),
             device_monitor: Some(device_monitor),
             device_event_receiver: Some(device_event_receiver),
+            per_app_enabled: false,
+            per_app_target_app: None,
+            per_app_target_name: None,
         }
     }
 
@@ -86,7 +92,12 @@ impl RecordingManager {
             ("No Microphone".to_string(), super::device_detection::InputDeviceKind::Unknown)
         };
 
-        let (sys_name, sys_kind) = if let Some(ref sys) = system_device {
+        let (sys_name, sys_kind) = if self.per_app_enabled && self.per_app_target_app.is_some() {
+            let app_name = self.per_app_target_name.as_deref()
+                .or(self.per_app_target_app.as_deref())
+                .unwrap_or("App");
+            (format!("App Audio ({})", app_name), super::device_detection::InputDeviceKind::Wired)
+        } else if let Some(ref sys) = system_device {
             let device_kind = super::device_detection::InputDeviceKind::detect(&sys.name, 512, 48000);
             (sys.name.clone(), device_kind)
         } else {
@@ -105,7 +116,7 @@ impl RecordingManager {
             || saver.start_accumulation(auto_save),
             mic_name,
             mic_kind,
-            sys_name,
+            sys_name.clone(),
             sys_kind,
             level_sender, // Live per-source level meter for the frontend visualizer
         ) {
@@ -115,7 +126,7 @@ impl RecordingManager {
         }
         self.recording_saver.set_device_info(
             microphone_device.as_ref().map(|d| d.name.clone()),
-            system_device.as_ref().map(|d| d.name.clone())
+            Some(sys_name)
         );
 
         // Give the pipeline a moment to fully initialize before starting streams
@@ -123,11 +134,17 @@ impl RecordingManager {
 
         // Start audio streams - they send RAW unmixed chunks to pipeline for mixing
         // Pipeline handles mixing and distribution to both recording and transcription
-        self.stream_manager.start_streams(microphone_device.clone(), system_device.clone(), None).await?;
+        let per_app_opt = if self.per_app_enabled {
+            self.per_app_target_app.as_ref().map(|app| (app.clone(), self.per_app_target_name.clone()))
+        } else {
+            None
+        };
+        self.stream_manager.start_streams_with_per_app(microphone_device.clone(), system_device.clone(), per_app_opt, None).await?;
 
-        // Start device monitoring to detect disconnects
+        // Start device monitoring to detect disconnects (skip system device monitoring if per-app)
         if let Some(ref mut monitor) = self.device_monitor {
-            if let Err(e) = monitor.start_monitoring(microphone_device, system_device) {
+            let monitor_sys = if self.per_app_enabled { None } else { system_device.clone() };
+            if let Err(e) = monitor.start_monitoring(microphone_device, monitor_sys) {
                 warn!("Failed to start device monitoring: {}", e);
                 // Non-fatal - continue without monitoring
             } else {
@@ -439,6 +456,18 @@ impl RecordingManager {
     /// Set the meeting name for this recording session
     pub fn set_meeting_name(&mut self, name: Option<String>) {
         self.recording_saver.set_meeting_name(name);
+    }
+
+    /// Configure per-application audio recording
+    pub fn set_per_app_config(
+        &mut self,
+        enabled: bool,
+        target_app: Option<String>,
+        target_name: Option<String>,
+    ) {
+        self.per_app_enabled = enabled;
+        self.per_app_target_app = target_app;
+        self.per_app_target_name = target_name;
     }
 
     pub fn set_recordings_folder(&mut self, path: std::path::PathBuf) {

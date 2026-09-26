@@ -79,6 +79,12 @@ pub struct RecordingPreferences {
     #[cfg(target_os = "macos")]
     #[serde(default)]
     pub system_audio_backend: Option<String>,
+    #[serde(default)]
+    pub per_app_recording_enabled: bool,
+    #[serde(default)]
+    pub per_app_target_app: Option<String>,
+    #[serde(default)]
+    pub per_app_target_name: Option<String>,
 }
 
 fn default_mic_gain() -> f32 {
@@ -101,6 +107,9 @@ impl Default for RecordingPreferences {
             system_gain: 1.0,
             #[cfg(target_os = "macos")]
             system_audio_backend: Some("coreaudio".to_string()),
+            per_app_recording_enabled: false,
+            per_app_target_app: None,
+            per_app_target_name: None,
         }
     }
 }
@@ -419,6 +428,59 @@ pub async fn select_recording_folder<R: Runtime>(
     })
     .await
     .map_err(|error| format!("Recording folder dialog failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn get_recordable_apps() -> Result<Vec<crate::audio::capture::per_app::RecordableApp>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::audio::capture::per_app::get_recordable_apps_list()
+            .map_err(|e| format!("Failed to list recordable apps: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[tauri::command]
+pub async fn select_custom_app_executable<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<crate::audio::capture::per_app::RecordableApp>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let file_filter = ["exe"];
+        #[cfg(target_os = "macos")]
+        let file_filter = ["app"];
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let file_filter: [&str; 0] = [];
+
+        let file_path = app
+            .dialog()
+            .file()
+            .set_title("Select Application or Executable")
+            .add_filter("Application", &file_filter)
+            .blocking_pick_file();
+
+        if let Some(path) = file_path {
+            let path_str = path.to_string();
+            let p = std::path::Path::new(&path_str);
+            let exe_name = p.file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or(&path_str)
+                .to_string();
+
+            Ok(Some(crate::audio::capture::per_app::RecordableApp {
+                id: exe_name.clone(),
+                name: exe_name.clone(),
+                executable: exe_name.clone(),
+                pid: crate::audio::capture::per_app::find_pid_for_app(&exe_name),
+                has_audio: false,
+                icon: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| format!("Failed to pick executable: {}", e))?
 }
 
 /// Delete a just-written meeting folder (used when a take is discarded as too short).
