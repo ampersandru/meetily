@@ -250,15 +250,6 @@ pub mod windows_loopback {
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
-    #[link(name = "propsys")]
-    extern "system" {
-        fn InitPropVariantFromBuffer(
-            pv: *const std::ffi::c_void,
-            cb: u32,
-            ppropvar: *mut windows::core::PROPVARIANT,
-        ) -> windows::core::HRESULT;
-    }
-
     #[repr(C)]
     #[derive(Clone, Copy)]
     #[allow(non_snake_case)]
@@ -273,6 +264,23 @@ pub mod windows_loopback {
     pub struct AUDIOCLIENT_ACTIVATION_PARAMS {
         pub ActivationType: u32,
         pub ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Blob {
+        pub cb_size: u32,
+        pub p_blob_data: *mut u8,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct PropVariantBlob {
+        pub vt: u16,
+        pub w_reserved1: u16,
+        pub w_reserved2: u16,
+        pub w_reserved3: u16,
+        pub blob: Blob,
     }
 
     #[implement(IActivateAudioInterfaceCompletionHandler)]
@@ -323,18 +331,29 @@ pub mod windows_loopback {
                 },
             };
 
-            let mut prop = windows::core::PROPVARIANT::default();
-            unsafe {
-                let hr = InitPropVariantFromBuffer(
-                    &params as *const _ as *const std::ffi::c_void,
-                    std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
-                    &mut prop,
-                );
-                if hr.is_err() {
-                    log::error!("❌ Failed to initialize propvariant for loopback: {:?}", hr);
-                    return;
-                }
+            let p_mem = unsafe {
+                windows::Win32::System::Com::CoTaskMemAlloc(std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>())
+            } as *mut AUDIOCLIENT_ACTIVATION_PARAMS;
+            if p_mem.is_null() {
+                log::error!("❌ CoTaskMemAlloc failed for process loopback parameters");
+                return;
             }
+            unsafe {
+                std::ptr::write(p_mem, params);
+            }
+
+            let prop_blob = PropVariantBlob {
+                vt: 65, // VT_BLOB
+                w_reserved1: 0,
+                w_reserved2: 0,
+                w_reserved3: 0,
+                blob: Blob {
+                    cb_size: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
+                    p_blob_data: p_mem as *mut u8,
+                },
+            };
+
+            let mut prop: windows::core::PROPVARIANT = unsafe { std::mem::transmute(prop_blob) };
 
             let (tx, rx) = std::sync::mpsc::channel();
             let handler: IActivateAudioInterfaceCompletionHandler =
@@ -343,7 +362,7 @@ pub mod windows_loopback {
             log::info!("🎙️ Activating process loopback for PID {}", target_pid);
             let async_op = unsafe {
                 ActivateAudioInterfaceAsync(
-                    w!("VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK"),
+                    w!("VAD\\Process_Loopback"),
                     &IAudioClient::IID,
                     Some(&prop),
                     &handler,
@@ -372,6 +391,7 @@ pub mod windows_loopback {
 
             // Clear activation parameters now that async activation is finished
             let _ = unsafe { PropVariantClear(&mut prop) };
+
 
             let audio_client: IAudioClient = match audio_client_unk.cast() {
                 Ok(client) => client,
