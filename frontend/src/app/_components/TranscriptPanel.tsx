@@ -26,6 +26,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { SpeakersSidebar } from '@/components/SpeakersSidebar';
 import { SpeakerRenameDialog } from '@/components/MeetingDetails/SpeakerRenameDialog';
 import { MergeSpeakerDialog } from '@/components/MergeSpeakerDialog';
+import { loadLabsPreferences } from '@/lib/labs';
 
 /**
  * TranscriptPanel Component
@@ -65,6 +66,14 @@ export function TranscriptPanel({
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [userName, setUserName] = useState('');
+  const [nearLiveCaptions, setNearLiveCaptions] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setNearLiveCaptions(loadLabsPreferences().nearLiveCaptions);
+    sync();
+    window.addEventListener('meetily-labs-changed', sync);
+    return () => window.removeEventListener('meetily-labs-changed', sync);
+  }, []);
 
   useEffect(() => {
     setShowSpeakersSidebar(showSpeakersPanel);
@@ -169,6 +178,7 @@ export function TranscriptPanel({
               <VirtualizedTranscriptView
                 segments={segments}
                 isRecording={isRecording}
+                nearLiveCaptions={nearLiveCaptions}
                 isPaused={isPaused}
                 isProcessing={isProcessingStop}
                 isStopping={isStopping}

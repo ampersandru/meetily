@@ -33,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { motion } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
 import { cleanTranscriptText } from '@/lib/labs';
+import { mergeInterleavedSpeakerTurns } from '@/lib/nearLiveCaptions';
 import { GitMerge } from "lucide-react";
 import {
   isUserSpeaker,
@@ -79,6 +80,7 @@ export interface VirtualizedTranscriptViewProps {
     onSeekAudio?: (seconds: number) => void;
     activeAudioTime?: number;
     cleanView?: boolean;
+    nearLiveCaptions?: boolean;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -279,6 +281,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     onSeekAudio,
     activeAudioTime,
     cleanView = false,
+    nearLiveCaptions = false,
 }) => {
     // Greet the user by name when they've set one (Settings → General → Your
     // Name). Read on mount rather than at module scope so it picks up changes
@@ -292,8 +295,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
     // One bubble per speaking turn instead of dozens of VAD fragments.
     const displaySegments = useMemo(
-        () => onSeekAudio ? segments : mergeAdjacentSameSpeaker(segments),
-        [segments, onSeekAudio],
+        () => onSeekAudio ? segments : nearLiveCaptions && isRecording
+            ? mergeInterleavedSpeakerTurns(segments)
+            : mergeAdjacentSameSpeaker(segments),
+        [segments, onSeekAudio, nearLiveCaptions, isRecording],
     );
     const colorIndices = useMemo(
         () => speakerColorIndexMap(segments.map(segment => segment.speaker).filter((speaker): speaker is string => !!speaker)),
